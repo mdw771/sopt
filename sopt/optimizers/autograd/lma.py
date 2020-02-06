@@ -69,7 +69,7 @@ class LMA(object):
         if self._squared_loss:
             self._hjvp = self._jvp
         else:
-            self._hjvp = ag.differential_operators.make_hvp(self._loss_fn)
+            self._hjvp = ag.differential_operators.make_hvp(self._loss_fn) # Returns make_vjp(grad(loss)) that returns loss Hessian and end value grad(L(f))
 
     def _matrix_vector_operators(self) -> List[float]:   
         vjp_fun_this, predictions_array = self._vjp(self._input_var) 
@@ -81,7 +81,7 @@ class LMA(object):
             hjvp_fun_this = lambda x: x#jvp_fun_this
             jloss = self._grad(predictions_array)
         else:
-            hjvp_fun_this, jloss = self._hjvp(predictions_array)
+            hjvp_fun_this, jloss = self._hjvp(predictions_array) # Returns VJP of grad(predictions_array) (the Hessian) and grad(L(f)) wrt prediction function
         
         return vjp_fun_this, jvp_fun_this, hjvp_fun_this, jloss, loss_before_update
     
@@ -102,6 +102,8 @@ class LMA(object):
         linear_b = -vjp_fun_this(jloss)
         
         while True:
+
+            # h is the displacement vector (x <- x + h) to be solved by CG
             linear_ax = lambda h: vjp_fun_this(hjvp_fun_this(jvp_fun_this(h))) + self._damping_factor * h
             
             # I am planning on trying out both the scipy linear solver 
@@ -110,6 +112,10 @@ class LMA(object):
             # i.e., using the solution from the previous run.
             
             A = LinearOperator((linear_b.size, linear_b.size), matvec=linear_ax)
+
+            # Solve [J_f^T * H_L * J_f + I * lambda] * h = J_f^T * grad_f(L)
+            # where f is the prediction function, L is the loss, L = L[f(x), y]
+            # J_f is the Jacobian of f wrt x; H_L is the Hessian of L wrt f
             opt_out = scipy.sparse.linalg.cg(A, linear_b, tol=self._cg_tol, 
                                              x0=self._update_var,
                                              maxiter=self._max_cg_iter)
